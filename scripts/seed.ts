@@ -3,7 +3,11 @@
  * Grupos A–L con 4 equipos cada uno, fechas oficiales (11 jun – 3 jul 2026).
  * Ejecutar: npm run seed
  */
-import { getDb } from "../lib/db/schema";
+import { config } from "dotenv";
+import { resolve } from "path";
+config({ path: resolve(process.cwd(), ".env.local") });
+
+import { getDb, initSchema } from "../lib/db/schema";
 
 const TEAMS: { id: number; name: string; short_name: string; country: string; group_code: string }[] = [
   // Grupo A
@@ -68,9 +72,6 @@ const TEAMS: { id: number; name: string; short_name: string; country: string; gr
   { id: 48, name: "Bolivia",        short_name: "BOL", country: "Bolivia",     group_code: "L" },
 ];
 
-// 48 partidos de fase de grupos: 6 partidos por grupo (cada equipo juega 3).
-// Fechas distribuidas del 11 jun al 3 jul 2026.
-// Formato jornada: J1 (pares 1-2, 3-4), J2 (pares 1-3, 2-4), J3 (pares 1-4, 2-3)
 function buildGroupFixtures() {
   const groupTeams: Record<string, number[]> = {};
   for (const t of TEAMS) {
@@ -78,8 +79,6 @@ function buildGroupFixtures() {
     groupTeams[t.group_code].push(t.id);
   }
 
-  // Fechas base por jornada (UTC, hora aproximada según sede)
-  // Mundial 2026: USA/México/Canadá. Simplificamos con horarios representativos.
   const jornadas: Record<string, [string, string, string]> = {
     A: ["2026-06-11T22:00:00Z", "2026-06-16T01:00:00Z", "2026-06-20T23:00:00Z"],
     B: ["2026-06-12T01:00:00Z", "2026-06-16T21:00:00Z", "2026-06-21T02:00:00Z"],
@@ -96,63 +95,51 @@ function buildGroupFixtures() {
   };
 
   const fixtures: {
-    id: number;
-    home_id: number;
-    away_id: number;
-    kickoff_utc: string;
-    stage: string;
-    group_code: string;
-    status: string;
+    id: number; home_id: number; away_id: number;
+    kickoff_utc: string; stage: string; group_code: string; status: string;
   }[] = [];
 
   let fixtureId = 1000;
   for (const [code, [t1, t2, t3, t4]] of Object.entries(groupTeams) as [string, [number, number, number, number]][]) {
-    const [j1base, j2base, j3base] = jornadas[code];
-    // J1: t1 vs t2, t3 vs t4
-    fixtures.push({ id: fixtureId++, home_id: t1, away_id: t2, kickoff_utc: j1base, stage: `Group Stage - ${code}`, group_code: code, status: "NS" });
-    fixtures.push({ id: fixtureId++, home_id: t3, away_id: t4, kickoff_utc: j1base, stage: `Group Stage - ${code}`, group_code: code, status: "NS" });
-    // J2: t1 vs t3, t2 vs t4
-    fixtures.push({ id: fixtureId++, home_id: t1, away_id: t3, kickoff_utc: j2base, stage: `Group Stage - ${code}`, group_code: code, status: "NS" });
-    fixtures.push({ id: fixtureId++, home_id: t2, away_id: t4, kickoff_utc: j2base, stage: `Group Stage - ${code}`, group_code: code, status: "NS" });
-    // J3: t1 vs t4, t2 vs t3 (simultáneos)
-    fixtures.push({ id: fixtureId++, home_id: t1, away_id: t4, kickoff_utc: j3base, stage: `Group Stage - ${code}`, group_code: code, status: "NS" });
-    fixtures.push({ id: fixtureId++, home_id: t2, away_id: t3, kickoff_utc: j3base, stage: `Group Stage - ${code}`, group_code: code, status: "NS" });
+    const [j1, j2, j3] = jornadas[code];
+    fixtures.push({ id: fixtureId++, home_id: t1, away_id: t2, kickoff_utc: j1, stage: `Group Stage - ${code}`, group_code: code, status: "NS" });
+    fixtures.push({ id: fixtureId++, home_id: t3, away_id: t4, kickoff_utc: j1, stage: `Group Stage - ${code}`, group_code: code, status: "NS" });
+    fixtures.push({ id: fixtureId++, home_id: t1, away_id: t3, kickoff_utc: j2, stage: `Group Stage - ${code}`, group_code: code, status: "NS" });
+    fixtures.push({ id: fixtureId++, home_id: t2, away_id: t4, kickoff_utc: j2, stage: `Group Stage - ${code}`, group_code: code, status: "NS" });
+    fixtures.push({ id: fixtureId++, home_id: t1, away_id: t4, kickoff_utc: j3, stage: `Group Stage - ${code}`, group_code: code, status: "NS" });
+    fixtures.push({ id: fixtureId++, home_id: t2, away_id: t3, kickoff_utc: j3, stage: `Group Stage - ${code}`, group_code: code, status: "NS" });
   }
 
   return fixtures;
 }
 
-function run() {
+async function run() {
   console.log("[seed] Iniciando seed del Mundial 2026...");
-  const db = getDb();
+  const sql = getDb();
 
-  // Insertar equipos
-  const upsertTeam = db.prepare(`
-    INSERT INTO teams (id, name, short_name, country, group_code)
-    VALUES (@id, @name, @short_name, @country, @group_code)
-    ON CONFLICT(id) DO UPDATE SET
-      name = excluded.name, short_name = excluded.short_name,
-      country = excluded.country, group_code = excluded.group_code
-  `);
+  await initSchema();
 
-  db.transaction(() => {
-    for (const t of TEAMS) upsertTeam.run(t);
-  })();
+  for (const t of TEAMS) {
+    await sql`
+      INSERT INTO teams (id, name, short_name, country, group_code)
+      VALUES (${t.id}, ${t.name}, ${t.short_name}, ${t.country}, ${t.group_code})
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name, short_name = EXCLUDED.short_name,
+        country = EXCLUDED.country, group_code = EXCLUDED.group_code
+    `;
+  }
   console.log(`[seed] ${TEAMS.length} equipos insertados`);
 
-  // Insertar fixtures
   const fixtures = buildGroupFixtures();
-  const upsertFixture = db.prepare(`
-    INSERT INTO fixtures (id, home_id, away_id, kickoff_utc, stage, group_code, status)
-    VALUES (@id, @home_id, @away_id, @kickoff_utc, @stage, @group_code, @status)
-    ON CONFLICT(id) DO NOTHING
-  `);
-
-  db.transaction(() => {
-    for (const f of fixtures) upsertFixture.run(f);
-  })();
+  for (const f of fixtures) {
+    await sql`
+      INSERT INTO fixtures (id, home_id, away_id, kickoff_utc, stage, group_code, status)
+      VALUES (${f.id}, ${f.home_id}, ${f.away_id}, ${f.kickoff_utc}, ${f.stage}, ${f.group_code}, ${f.status})
+      ON CONFLICT (id) DO NOTHING
+    `;
+  }
   console.log(`[seed] ${fixtures.length} fixtures de fase de grupos insertados`);
   console.log("[seed] Seed completado. Ejecuta 'npm run cron' para generar predicciones.");
 }
 
-run();
+run().catch(console.error);

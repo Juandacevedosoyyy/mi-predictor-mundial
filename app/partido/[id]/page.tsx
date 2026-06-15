@@ -41,8 +41,8 @@ const DEFAULT_STATS = {
 
 async function getFixture(id: number): Promise<FixtureRow | null> {
   try {
-    const db = getDb();
-    const row = db.prepare(`
+    const sql = getDb();
+    const rows = await sql`
       SELECT f.*,
         th.name as home_name, ta.name as away_name,
         p.home_win_pct, p.draw_pct, p.away_win_pct,
@@ -56,9 +56,9 @@ async function getFixture(id: number): Promise<FixtureRow | null> {
         SELECT * FROM predictions
         WHERE id IN (SELECT MAX(id) FROM predictions GROUP BY fixture_id)
       ) p ON p.fixture_id = f.id
-      WHERE f.id = ?
-    `).get(id) as FixtureRow | undefined;
-    return row ?? null;
+      WHERE f.id = ${id}
+    ` as FixtureRow[];
+    return rows[0] ?? null;
   } catch {
     return null;
   }

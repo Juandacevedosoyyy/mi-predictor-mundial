@@ -32,9 +32,9 @@ async function getHomeData(): Promise<{
   }>;
 }> {
   try {
-    const db = getDb();
+    const sql = getDb();
 
-    const teams = db.prepare("SELECT * FROM teams").all() as Team[];
+    const teams = await sql`SELECT * FROM teams` as Team[];
     const defaultStats = {
       goalsFor: 1.35,
       goalsAgainst: 1.35,
@@ -54,18 +54,16 @@ async function getHomeData(): Promise<{
         ? simulateTournament(teamsWithStats, [], 5000)
         : DEMO_CHAMPIONS;
 
-    const fixtures = db
-      .prepare(
-        `SELECT f.*,
-          th.id as h_id, th.name as h_name, th.short_name as h_short, th.logo as h_logo,
-          ta.id as a_id, ta.name as a_name, ta.short_name as a_short, ta.logo as a_logo
-         FROM fixtures f
-         JOIN teams th ON th.id = f.home_id
-         JOIN teams ta ON ta.id = f.away_id
-         WHERE f.status = 'NS'
-         ORDER BY f.kickoff_utc ASC LIMIT 6`
-      )
-      .all() as Array<Record<string, unknown>>;
+    const fixtures = await sql`
+      SELECT f.*,
+        th.id as h_id, th.name as h_name, th.short_name as h_short, th.logo as h_logo,
+        ta.id as a_id, ta.name as a_name, ta.short_name as a_short, ta.logo as a_logo
+      FROM fixtures f
+      JOIN teams th ON th.id = f.home_id
+      JOIN teams ta ON ta.id = f.away_id
+      WHERE f.status = 'NS'
+      ORDER BY f.kickoff_utc ASC LIMIT 6
+    ` as Array<Record<string, unknown>>;
 
     const nextFixtures = fixtures.map((f) => {
       const pred = predictMatch(defaultStats, defaultStats);
