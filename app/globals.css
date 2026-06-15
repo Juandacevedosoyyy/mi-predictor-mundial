@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-destructive: var(--destructive);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --radius: 0.5rem;
+}
+
+:root {
+  /* Dark broadcast terminal theme */
+  --background: #090d14;
+  --foreground: #e8edf5;
+  --card: #0f1520;
+  --card-foreground: #e8edf5;
+  --border: #1e2a3a;
+  --muted: #131c29;
+  --muted-foreground: #6b7a8f;
+  /* Electric cyan accent — Opta/broadcast look */
+  --accent: #00d4ff;
+  --accent-foreground: #090d14;
+  --primary: #00d4ff;
+  --primary-foreground: #090d14;
+  --destructive: #ff4444;
+  --ring: #00d4ff40;
+}
+
+* {
+  border-color: var(--border);
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Broadcast grid lines effect */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: linear-gradient(
+      rgba(0, 212, 255, 0.015) 1px,
+      transparent 1px
+    ),
+    linear-gradient(90deg, rgba(0, 212, 255, 0.015) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+#__next,
+main {
+  position: relative;
+  z-index: 1;
+}
