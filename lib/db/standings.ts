@@ -13,27 +13,27 @@ export interface Standing {
   pts: number;
 }
 
-export async function computeGroupStandings(groupCode: string): Promise<Standing[]> {
-  const sql = getDb();
+export function computeGroupStandings(groupCode: string): Standing[] {
+  const db = getDb();
 
-  const teams = await sql`
+  const teams = db.prepare(`
     SELECT DISTINCT t.id, t.name
     FROM fixtures f
     JOIN teams t ON t.id = f.home_id OR t.id = f.away_id
-    WHERE f.group_code = ${groupCode}
+    WHERE f.group_code = ?
     ORDER BY t.name
-  ` as { id: number; name: string }[];
+  `).all(groupCode) as { id: number; name: string }[];
 
   const map = new Map<number, Standing>();
   for (const t of teams) {
     map.set(t.id, { teamId: t.id, name: t.name, pld: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gd: 0, pts: 0 });
   }
 
-  const played = await sql`
+  const played = db.prepare(`
     SELECT home_id, away_id, home_score, away_score
     FROM fixtures
-    WHERE group_code = ${groupCode} AND status = 'FT' AND home_score IS NOT NULL
-  ` as Array<{ home_id: number; away_id: number; home_score: number; away_score: number }>;
+    WHERE group_code = ? AND status = 'FT' AND home_score IS NOT NULL
+  `).all(groupCode) as Array<{ home_id: number; away_id: number; home_score: number; away_score: number }>;
 
   for (const f of played) {
     const home = map.get(f.home_id);
@@ -63,15 +63,14 @@ export async function computeGroupStandings(groupCode: string): Promise<Standing
     });
 }
 
-export async function getAllGroupCodes(): Promise<string[]> {
+export function getAllGroupCodes(): string[] {
   try {
-    const sql = getDb();
-    const rows = await sql`
+    const db = getDb();
+    return (db.prepare(`
       SELECT DISTINCT group_code FROM fixtures
       WHERE group_code IS NOT NULL
       ORDER BY group_code
-    ` as { group_code: string }[];
-    return rows.map((r) => r.group_code);
+    `).all() as { group_code: string }[]).map((r) => r.group_code);
   } catch {
     return [];
   }

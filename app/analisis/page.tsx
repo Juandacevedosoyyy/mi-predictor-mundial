@@ -29,32 +29,13 @@ interface PageProps {
   searchParams: Promise<{ g?: string }>;
 }
 
-async function getFixtures(grupo?: string): Promise<FixtureRow[]> {
-  const sql = getDb();
+function getFixtures(grupo?: string): FixtureRow[] {
+  const db = getDb();
+  const where = grupo
+    ? `f.group_code = '${grupo.toUpperCase()}'`
+    : `f.status = 'NS'`;
 
-  if (grupo) {
-    return await sql`
-      SELECT
-        f.id, f.kickoff_utc, f.stage, f.group_code,
-        th.name AS home_name, ta.name AS away_name,
-        p.home_win_pct, p.draw_pct, p.away_win_pct,
-        p.home_goals_ev, p.away_goals_ev,
-        p.over25_pct, p.btts_pct, p.exact_scores,
-        p.corners_ev, p.home_corners_ev, p.away_corners_ev,
-        p.yellow_cards_ev
-      FROM fixtures f
-      JOIN teams th ON th.id = f.home_id
-      JOIN teams ta ON ta.id = f.away_id
-      INNER JOIN (
-        SELECT * FROM predictions
-        WHERE id IN (SELECT MAX(id) FROM predictions GROUP BY fixture_id)
-      ) p ON p.fixture_id = f.id
-      WHERE f.group_code = ${grupo.toUpperCase()}
-      ORDER BY f.kickoff_utc ASC
-    ` as FixtureRow[];
-  }
-
-  return await sql`
+  return db.prepare(`
     SELECT
       f.id, f.kickoff_utc, f.stage, f.group_code,
       th.name AS home_name, ta.name AS away_name,
@@ -70,17 +51,16 @@ async function getFixtures(grupo?: string): Promise<FixtureRow[]> {
       SELECT * FROM predictions
       WHERE id IN (SELECT MAX(id) FROM predictions GROUP BY fixture_id)
     ) p ON p.fixture_id = f.id
-    WHERE f.status = 'NS'
+    WHERE ${where}
     ORDER BY f.kickoff_utc ASC
-  ` as FixtureRow[];
+  `).all() as FixtureRow[];
 }
 
-async function getAllGroupCodes(): Promise<string[]> {
-  const sql = getDb();
-  const rows = await sql`
-    SELECT DISTINCT group_code FROM fixtures WHERE group_code IS NOT NULL ORDER BY group_code
-  ` as { group_code: string }[];
-  return rows.map((r) => r.group_code);
+function getAllGroupCodes(): string[] {
+  const db = getDb();
+  return (db.prepare(
+    `SELECT DISTINCT group_code FROM fixtures WHERE group_code IS NOT NULL ORDER BY group_code`
+  ).all() as { group_code: string }[]).map((r) => r.group_code);
 }
 
 function formatDate(iso: string) {
@@ -274,7 +254,8 @@ function MatchCard({ f }: { f: FixtureRow }) {
 // ── Página principal ────────────────────────────────────────────────────────
 export default async function AnalisisPage({ searchParams }: PageProps) {
   const { g } = await searchParams;
-  const [groupCodes, fixtures] = await Promise.all([getAllGroupCodes(), getFixtures(g)]);
+  const groupCodes = getAllGroupCodes();
+  const fixtures = getFixtures(g);
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">

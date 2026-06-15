@@ -3,19 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { getDb } from "@/lib/db/schema";
 import { predictMatch, type TeamStats } from "@/lib/model/poisson";
-import type { NeonQueryFunction } from "@neondatabase/serverless";
-
-type Sql = NeonQueryFunction<false, false>;
 
 export async function saveResult(fixtureId: number, homeScore: number, awayScore: number) {
-  const sql = getDb();
+  const db = getDb();
 
-  await sql`
-    UPDATE fixtures SET home_score = ${homeScore}, away_score = ${awayScore}, status = 'FT'
-    WHERE id = ${fixtureId}
-  `;
+  db.prepare(`
+    UPDATE fixtures SET home_score = ?, away_score = ?, status = 'FT' WHERE id = ?
+  `).run(homeScore, awayScore, fixtureId);
 
-  await recalcPredictions(sql);
+  recalcPredictions(db);
 
   revalidatePath("/admin");
   revalidatePath("/grupos");
@@ -24,14 +20,13 @@ export async function saveResult(fixtureId: number, homeScore: number, awayScore
 }
 
 export async function clearResult(fixtureId: number) {
-  const sql = getDb();
+  const db = getDb();
 
-  await sql`
-    UPDATE fixtures SET home_score = NULL, away_score = NULL, status = 'NS'
-    WHERE id = ${fixtureId}
-  `;
+  db.prepare(`
+    UPDATE fixtures SET home_score = NULL, away_score = NULL, status = 'NS' WHERE id = ?
+  `).run(fixtureId);
 
-  await recalcPredictions(sql);
+  recalcPredictions(db);
 
   revalidatePath("/admin");
   revalidatePath("/grupos");
@@ -39,15 +34,14 @@ export async function clearResult(fixtureId: number) {
   revalidatePath(`/partido/${fixtureId}`);
 }
 
-async function getTeamStats(sql: Sql, teamId: number): Promise<TeamStats> {
-  const played = await sql`
+function getTeamStats(db: ReturnType<typeof getDb>, teamId: number): TeamStats {
+  const played = db.prepare(`
     SELECT home_id, away_id, home_score, away_score
     FROM fixtures
-    WHERE (home_id = ${teamId} OR away_id = ${teamId})
-      AND status = 'FT' AND home_score IS NOT NULL
+    WHERE (home_id = ? OR away_id = ?) AND status = 'FT' AND home_score IS NOT NULL
     ORDER BY kickoff_utc DESC
     LIMIT 5
-  ` as Array<{ home_id: number; away_id: number; home_score: number; away_score: number }>;
+  `).all(teamId, teamId) as Array<{ home_id: number; away_id: number; home_score: number; away_score: number }>;
 
   if (played.length === 0) {
     return { goalsFor: 1.35, goalsAgainst: 1.35, cornersFor: 5, cornersAgainst: 5, yellowCards: 2 };
@@ -61,42 +55,52 @@ async function getTeamStats(sql: Sql, teamId: number): Promise<TeamStats> {
 
   const n = played.length;
   return {
-    goalsFor:       Math.max(0.3, gf / n),
-    goalsAgainst:   Math.max(0.3, ga / n),
-    cornersFor:     5,
+    goalsFor: Math.max(0.3, gf / n),
+    goalsAgainst: Math.max(0.3, ga / n),
+    cornersFor: 5,
     cornersAgainst: 5,
-    yellowCards:    2,
+    yellowCards: 2,
   };
 }
 
-async function recalcPredictions(sql: Sql) {
-  const futures = await sql`
+function recalcPredictions(db: ReturnType<typeof getDb>) {
+  const futures = db.prepare(`
     SELECT id, home_id, away_id FROM fixtures WHERE status = 'NS'
-  ` as Array<{ id: number; home_id: number; away_id: number }>;
+  `).all() as Array<{ id: number; home_id: number; away_id: number }>;
 
   if (futures.length === 0) return;
 
+  const insert = db.prepare(`
+    INSERT INTO predictions (
+      fixture_id, generated_at, home_win_pct, draw_pct, away_win_pct,
+      home_goals_ev, away_goals_ev, over25_pct, btts_pct, exact_scores,
+      corners_ev, home_corners_ev, away_corners_ev, yellow_cards_ev
+    ) VALUES (
+      @fixture_id, @generated_at, @home_win_pct, @draw_pct, @away_win_pct,
+      @home_goals_ev, @away_goals_ev, @over25_pct, @btts_pct, @exact_scores,
+      @corners_ev, @home_corners_ev, @away_corners_ev, @yellow_cards_ev
+    )
+  `);
+
   const now = new Date().toISOString();
   const cache = new Map<number, TeamStats>();
-  const stat = async (id: number) => {
-    if (!cache.has(id)) cache.set(id, await getTeamStats(sql, id));
+  const stat = (id: number) => {
+    if (!cache.has(id)) cache.set(id, getTeamStats(db, id));
     return cache.get(id)!;
   };
 
-  for (const f of futures) {
-    const pred = predictMatch(await stat(f.home_id), await stat(f.away_id));
-    await sql`
-      INSERT INTO predictions (
-        fixture_id, generated_at, home_win_pct, draw_pct, away_win_pct,
-        home_goals_ev, away_goals_ev, over25_pct, btts_pct, exact_scores,
-        corners_ev, home_corners_ev, away_corners_ev, yellow_cards_ev
-      ) VALUES (
-        ${f.id}, ${now},
-        ${pred.homeWinPct}, ${pred.drawPct}, ${pred.awayWinPct},
-        ${pred.homeGoalsEv}, ${pred.awayGoalsEv},
-        ${pred.over25Pct}, ${pred.bttsPct}, ${JSON.stringify(pred.exactScores)},
-        ${pred.cornersEv}, ${pred.homeCornersEv}, ${pred.awayCornersEv}, ${pred.yellowCardsEv}
-      )
-    `;
-  }
+  db.transaction(() => {
+    for (const f of futures) {
+      const pred = predictMatch(stat(f.home_id), stat(f.away_id));
+      insert.run({
+        fixture_id: f.id, generated_at: now,
+        home_win_pct: pred.homeWinPct, draw_pct: pred.drawPct, away_win_pct: pred.awayWinPct,
+        home_goals_ev: pred.homeGoalsEv, away_goals_ev: pred.awayGoalsEv,
+        over25_pct: pred.over25Pct, btts_pct: pred.bttsPct,
+        exact_scores: JSON.stringify(pred.exactScores),
+        corners_ev: pred.cornersEv, home_corners_ev: pred.homeCornersEv,
+        away_corners_ev: pred.awayCornersEv, yellow_cards_ev: pred.yellowCardsEv,
+      });
+    }
+  })();
 }

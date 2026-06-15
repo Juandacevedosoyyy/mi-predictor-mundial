@@ -1,19 +1,23 @@
-import { neon } from "@neondatabase/serverless";
-import type { NeonQueryFunction } from "@neondatabase/serverless";
+import Database from "better-sqlite3";
+import path from "path";
 
-let _sql: NeonQueryFunction<false, false> | null = null;
+const DB_PATH = path.join(process.cwd(), "data", "mundial.db");
 
-export function getDb(): NeonQueryFunction<false, false> {
-  if (!_sql) {
-    _sql = neon(process.env.DATABASE_URL!);
+let _db: Database.Database | null = null;
+
+export function getDb(): Database.Database {
+  if (!_db) {
+    const { mkdirSync } = require("fs");
+    mkdirSync(path.dirname(DB_PATH), { recursive: true });
+    _db = new Database(DB_PATH);
+    _db.pragma("journal_mode = WAL");
+    initSchema(_db);
   }
-  return _sql;
+  return _db;
 }
 
-export async function initSchema(): Promise<void> {
-  const sql = getDb();
-
-  await sql`
+function initSchema(db: Database.Database) {
+  db.exec(`
     CREATE TABLE IF NOT EXISTS teams (
       id         INTEGER PRIMARY KEY,
       name       TEXT NOT NULL,
@@ -21,63 +25,53 @@ export async function initSchema(): Promise<void> {
       logo       TEXT,
       group_code TEXT,
       country    TEXT
-    )
-  `;
+    );
 
-  await sql`
     CREATE TABLE IF NOT EXISTS players (
-      id       SERIAL PRIMARY KEY,
-      team_id  INTEGER REFERENCES teams(id),
-      name     TEXT NOT NULL,
+      id      INTEGER PRIMARY KEY,
+      team_id INTEGER REFERENCES teams(id),
+      name    TEXT NOT NULL,
       position TEXT,
-      number   INTEGER
-    )
-  `;
+      number  INTEGER
+    );
 
-  await sql`
     CREATE TABLE IF NOT EXISTS fixtures (
       id          INTEGER PRIMARY KEY,
       home_id     INTEGER REFERENCES teams(id),
       away_id     INTEGER REFERENCES teams(id),
       kickoff_utc TEXT,
-      stage       TEXT,
+      stage       TEXT,  -- 'group' | 'r16' | 'qf' | 'sf' | 'final'
       group_code  TEXT,
       venue       TEXT,
-      status      TEXT DEFAULT 'NS',
+      status      TEXT DEFAULT 'NS', -- NS | 1H | HT | 2H | FT
       home_score  INTEGER,
       away_score  INTEGER
-    )
-  `;
+    );
 
-  await sql`
     CREATE TABLE IF NOT EXISTS match_stats (
-      id              SERIAL PRIMARY KEY,
-      fixture_id      INTEGER REFERENCES fixtures(id),
-      team_id         INTEGER REFERENCES teams(id),
-      shots           INTEGER,
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      fixture_id INTEGER REFERENCES fixtures(id),
+      team_id    INTEGER REFERENCES teams(id),
+      shots      INTEGER,
       shots_on_target INTEGER,
-      possession      INTEGER,
-      corners         INTEGER,
-      fouls           INTEGER,
-      yellow_cards    INTEGER,
-      red_cards       INTEGER
-    )
-  `;
+      possession INTEGER,
+      corners    INTEGER,
+      fouls      INTEGER,
+      yellow_cards INTEGER,
+      red_cards  INTEGER
+    );
 
-  await sql`
     CREATE TABLE IF NOT EXISTS match_events (
-      id         SERIAL PRIMARY KEY,
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
       fixture_id INTEGER REFERENCES fixtures(id),
       team_id    INTEGER REFERENCES teams(id),
       player_id  INTEGER REFERENCES players(id),
-      type       TEXT,
+      type       TEXT,  -- 'goal' | 'yellow' | 'red' | 'subst'
       minute     INTEGER
-    )
-  `;
+    );
 
-  await sql`
     CREATE TABLE IF NOT EXISTS predictions (
-      id               SERIAL PRIMARY KEY,
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
       fixture_id       INTEGER REFERENCES fixtures(id),
       generated_at     TEXT NOT NULL,
       home_win_pct     REAL,
@@ -87,12 +81,12 @@ export async function initSchema(): Promise<void> {
       away_goals_ev    REAL,
       over25_pct       REAL,
       btts_pct         REAL,
-      exact_scores     TEXT,
-      top_scorers      TEXT,
+      exact_scores     TEXT, -- JSON: [{score: "2-1", pct: 0.12}, ...]
+      top_scorers      TEXT, -- JSON: [{player_id, name, goals_ev}, ...]
       corners_ev       REAL,
       yellow_cards_ev  REAL,
       home_corners_ev  REAL,
       away_corners_ev  REAL
-    )
-  `;
+    );
+  `);
 }

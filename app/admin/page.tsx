@@ -19,11 +19,11 @@ interface FixtureRow {
   away_score: number | null;
 }
 
-async function getAdminData() {
+function getAdminData() {
   try {
-    const sql = getDb();
+    const db = getDb();
 
-    const fixtures = await sql`
+    const fixtures = db.prepare(`
       SELECT f.id, f.home_id, f.away_id, f.kickoff_utc, f.stage, f.group_code,
              f.status, f.home_score, f.away_score,
              th.name as home_name, ta.name as away_name
@@ -31,9 +31,9 @@ async function getAdminData() {
       JOIN teams th ON th.id = f.home_id
       JOIN teams ta ON ta.id = f.away_id
       ORDER BY f.group_code NULLS LAST, f.kickoff_utc ASC
-    ` as FixtureRow[];
+    `).all() as FixtureRow[];
 
-    const groupCodes = await getAllGroupCodes();
+    const groupCodes = getAllGroupCodes();
 
     return { fixtures, groupCodes, empty: fixtures.length === 0 };
   } catch {
@@ -72,8 +72,8 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-async function StandingsTable({ groupCode }: { groupCode: string }) {
-  const standings = await computeGroupStandings(groupCode);
+function StandingsTable({ groupCode }: { groupCode: string }) {
+  const standings = computeGroupStandings(groupCode);
   if (standings.length === 0) return null;
 
   return (
@@ -120,8 +120,8 @@ async function StandingsTable({ groupCode }: { groupCode: string }) {
   );
 }
 
-export default async function AdminPage() {
-  const { fixtures, groupCodes, empty } = await getAdminData();
+export default function AdminPage() {
+  const { fixtures, groupCodes, empty } = getAdminData();
 
   const byGroup = new Map<string, FixtureRow[]>();
   const knockout: FixtureRow[] = [];
@@ -178,7 +178,8 @@ export default async function AdminPage() {
             No hay fixtures en la base de datos.
           </p>
           <p className="text-[var(--muted-foreground)] text-xs">
-            Configura <code className="text-[var(--accent)]">FOOTBALL_DATA_KEY</code> y usa el botón{" "}
+            Configura <code className="text-[var(--accent)]">APISPORTS_KEY</code> en{" "}
+            <code className="text-[var(--accent)]">.env.local</code> y usa el botón{" "}
             <strong>Sync desde API</strong> para poblar los datos.
           </p>
         </div>
@@ -226,11 +227,14 @@ export default async function AdminPage() {
                   key={f.id}
                   className="flex items-center gap-3 px-4 py-3 hover:bg-[var(--muted)] transition-colors"
                 >
+                  {/* Fecha */}
                   <span className="text-[var(--muted-foreground)] text-[11px] w-24 shrink-0">
                     {formatDate(f.kickoff_utc)}
                   </span>
 
+                  {/* Equipos + formulario */}
                   <div className="flex items-center gap-2 flex-1 min-w-0">
+                    {/* Local */}
                     <span
                       className={`text-sm text-right flex-1 truncate ${
                         f.status === "FT" && f.home_score !== null && f.away_score !== null && f.home_score > f.away_score
@@ -248,6 +252,7 @@ export default async function AdminPage() {
                       status={f.status}
                     />
 
+                    {/* Visitante */}
                     <span
                       className={`text-sm text-left flex-1 truncate ${
                         f.status === "FT" && f.home_score !== null && f.away_score !== null && f.away_score > f.home_score
@@ -259,6 +264,7 @@ export default async function AdminPage() {
                     </span>
                   </div>
 
+                  {/* Status + link */}
                   <div className="flex items-center gap-2 shrink-0">
                     <StatusBadge status={f.status} />
                     <Link

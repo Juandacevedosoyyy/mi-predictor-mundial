@@ -37,11 +37,11 @@ function pct(n: number | null) {
 
 async function getGroupsData(): Promise<GroupData[]> {
   try {
-    const sql = getDb();
-    const groupCodes = await getAllGroupCodes();
+    const db = getDb();
+    const groupCodes = getAllGroupCodes();
     if (groupCodes.length === 0) return GRUPOS_DEMO;
 
-    const fixtures = await sql`
+    const fixtures = db.prepare(`
       SELECT f.id, f.kickoff_utc, f.status, f.home_score, f.away_score, f.group_code,
         th.name as home_name, ta.name as away_name,
         p.home_win_pct, p.draw_pct, p.away_win_pct,
@@ -56,7 +56,7 @@ async function getGroupsData(): Promise<GroupData[]> {
       ) p ON p.fixture_id = f.id
       WHERE f.group_code IS NOT NULL
       ORDER BY f.group_code, f.kickoff_utc
-    ` as Fixture[];
+    `).all() as Fixture[];
 
     const fixturesByGroup = new Map<string, Fixture[]>();
     for (const f of fixtures) {
@@ -65,11 +65,11 @@ async function getGroupsData(): Promise<GroupData[]> {
       fixturesByGroup.get(code)!.push(f);
     }
 
-    return Promise.all(groupCodes.map(async (code) => ({
+    return groupCodes.map((code) => ({
       code,
-      standings: await computeGroupStandings(code),
+      standings: computeGroupStandings(code),
       fixtures: fixturesByGroup.get(code) ?? [],
-    })));
+    }));
   } catch {
     return GRUPOS_DEMO;
   }
